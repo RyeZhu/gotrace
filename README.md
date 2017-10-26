@@ -1,4 +1,4 @@
-# GoTrace - Go Concurrency 3D Tracer
+1.9.2# GoTrace - Go Concurrency 3D Tracer
 
 GoTrace is a 3D WebGL visualizer of Go concurrency. It analyzes trace produced by `go tool trace` and renders visualization of concurrency flow.
 
@@ -174,30 +174,30 @@ If you really want to play around with gotrace, you may want to patch Go runtime
 
 Here are instructions on how to do it (MacOS X and Linux).
 
-1. Assuming your Go installation is in `/usr/local/go` (default), download Go 1.8.1 and unpack it into `/usr/local/go18-gotrace`.
+1. Assuming your Go installation is in `/usr/local/go` (default), download Go 1.9.2 and unpack it into `/usr/local/go19-gotrace`.
 
         sudo -i
-        mkdir -p /usr/local/go18-gotrace
-        curl https://storage.googleapis.com/golang/go1.8.1.src.tar.gz | tar -xz -C /usr/local/go18-gotrace
+        mkdir -p /usr/local/go19-gotrace
+        curl https://storage.googleapis.com/golang/go1.9.2.src.tar.gz | tar -xz -C /usr/local/go19-gotrace
 
 2. Then, copy patch and apply it:
 
-        sudo patch -p1 -d /usr/local/go18-gotrace/go < runtime/go1.8.1-gotrace.patch
+        sudo patch -p1 -d /usr/local/go19-gotrace/go < runtime/go1.9.2-gotrace.patch
 
 3. Build new runtime:
 
         sudo -i
-        cd /usr/local/go18-gotrace/go/src
+        cd /usr/local/go19-gotrace/go/src
         export GOROOT_BOOTSTRAP=/usr/local/go # or choose yours
         ./make.bash
 
 4. Finally, export PATH or use `ln -s` command to make this Go version actual in your system:
 
-		export PATH=/usr/local/go18-gotrace/go/bin:$PATH
+		export PATH=/usr/local/go19-gotrace/go/bin:$PATH
 or (assuming your PATH set to use /usr/local/go)
 
 		sudo mv /usr/local/go /usr/local/go-orig
-		sudo ln -nsf /usr/local/go18-gotrace/go /usr/local/go
+		sudo ln -nsf /usr/local/go19-gotrace/go /usr/local/go
 
 NOTE: return your previous installation by `sudo ln -nsf /usr/local/go-orig /usr/local/go`
 

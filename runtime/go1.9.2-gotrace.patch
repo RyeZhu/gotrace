@@ -1,0 +1,220 @@
+diff -uNr go192/src/internal/trace/parser.go go192-trace/src/internal/trace/parser.go
+--- go192/src/internal/trace/parser.go	2017-10-26 02:30:21.000000000 +0800
++++ go192-trace/src/internal/trace/parser.go	2017-10-26 16:40:53.000000000 +0800
+@@ -55,10 +55,10 @@
+ const (
+ 	// Special P identifiers:
+ 	FakeP    = 1000000 + iota
+-	TimerP   // depicts timer unblocks
+-	NetpollP // depicts network unblocks
+-	SyscallP // depicts returns from syscalls
+-	GCP      // depicts GC state
++	TimerP    // depicts timer unblocks
++	NetpollP  // depicts network unblocks
++	SyscallP  // depicts returns from syscalls
++	GCP       // depicts GC state
+ )
+ 
+ // Parse parses, post-processes and verifies the trace.
+@@ -496,7 +496,7 @@
+ // blocked before an unblock event).
+ func postProcessTrace(ver int, events []*Event) error {
+ 	const (
+-		gDead = iota
++		gDead     = iota
+ 		gRunnable
+ 		gRunning
+ 		gWaiting
+@@ -919,7 +919,9 @@
+ 	EvGoBlockGC         = 42 // goroutine blocks on GC assist [timestamp, stack]
+ 	EvGCMarkAssistStart = 43 // GC mark assist start [timestamp, stack]
+ 	EvGCMarkAssistDone  = 44 // GC mark assist done [timestamp]
+-	EvCount             = 45
++	EvGoSend            = 45 // goroutine chan send [timestamp, stack]
++	EvGoRecv            = 46 // goroutine chan recv [timestamp, stack]
++	EvCount             = 47
+ )
+ 
+ var EventDescriptions = [EvCount]struct {
+@@ -973,4 +975,6 @@
+ 	EvGoBlockGC:         {"GoBlockGC", 1008, true, []string{}},
+ 	EvGCMarkAssistStart: {"GCMarkAssistStart", 1009, true, []string{}},
+ 	EvGCMarkAssistDone:  {"GCMarkAssistDone", 1009, false, []string{}},
++	EvGoSend:            {"GoSend", 1008, false, []string{"eid", "cid", "val"}},
++	EvGoRecv:            {"GoRecv", 1008, false, []string{"eid", "cid", "val"}},
+ }
+diff -uNr go192/src/runtime/chan.go go192-trace/src/runtime/chan.go
+--- go192/src/runtime/chan.go	2017-10-26 02:30:21.000000000 +0800
++++ go192-trace/src/runtime/chan.go	2017-10-26 16:05:52.000000000 +0800
+@@ -29,6 +29,7 @@
+ )
+ 
+ type hchan struct {
++	id       uint64         // channel id for using in send/recv events
+ 	qcount   uint           // total data in the queue
+ 	dataqsiz uint           // size of the circular queue
+ 	buf      unsafe.Pointer // points to an array of dataqsiz elements
+@@ -54,6 +55,12 @@
+ 	last  *sudog
+ }
+ 
++// global evil counters for channel and send/recv event IDs
++var (
++	chID uint64 = 1
++	evID uint64 = 1
++)
++
+ //go:linkname reflect_makechan reflect.makechan
+ func reflect_makechan(t *chantype, size int64) *hchan {
+ 	return makechan(t, size)
+@@ -95,6 +102,8 @@
+ 	c.elemsize = uint16(elem.size)
+ 	c.elemtype = elem
+ 	c.dataqsiz = uint(size)
++	chID = atomic.Xadd64(&chID, 1)
++	c.id = chID
+ 
+ 	if debugChan {
+ 		print("makechan: chan=", c, "; elemsize=", elem.size, "; elemalg=", elem.alg, "; dataqsiz=", size, "\n")
+@@ -174,6 +183,8 @@
+ 	}
+ 
+ 	if sg := c.recvq.dequeue(); sg != nil {
++		sg.cid = c.id
++
+ 		// Found a waiting receiver. We pass the value we want to send
+ 		// directly to the receiver, bypassing the channel buffer (if any).
+ 		send(c, sg, ep, func() { unlock(&c.lock) }, 3)
+@@ -187,6 +198,10 @@
+ 			raceacquire(qp)
+ 			racerelease(qp)
+ 		}
++
++		evID = atomic.Xadd64(&evID, 1)
++		traceGoSend(evID, c.id, elem2int(ep))
++
+ 		typedmemmove(c.elemtype, qp, ep)
+ 		c.sendx++
+ 		if c.sendx == c.dataqsiz {
+@@ -218,6 +233,12 @@
+ 	mysg.c = c
+ 	gp.waiting = mysg
+ 	gp.param = nil
++
++	mysg.cid = c.id
++	evID = atomic.Xadd64(&evID, 1)
++	mysg.eventid = atomic.Load64(&evID)
++	traceGoSend(mysg.eventid, c.id, elem2int(ep))
++
+ 	c.sendq.enqueue(mysg)
+ 	goparkunlock(&c.lock, "chan send", traceEvGoBlockSend, 3)
+ 
+@@ -267,6 +288,11 @@
+ 			c.sendx = c.recvx // c.sendx = (c.sendx+1) % c.dataqsiz
+ 		}
+ 	}
++
++	evID = atomic.Xadd64(&evID, 1)
++	sg.eventid = atomic.Load64(&evID)
++	traceGoSend(evID, c.id, elem2int(ep))
++
+ 	if sg.elem != nil {
+ 		sendDirect(c.elemtype, sg, ep)
+ 		sg.elem = nil
+@@ -505,6 +531,8 @@
+ 	c.recvq.enqueue(mysg)
+ 	goparkunlock(&c.lock, "chan receive", traceEvGoBlockRecv, 3)
+ 
++	traceGoRecv(mysg.eventid, c.id, elem2int(ep))
++
+ 	// someone woke us up
+ 	if mysg != gp.waiting {
+ 		throw("G waiting list is corrupted")
+@@ -542,6 +570,7 @@
+ 			// copy data from sender
+ 			recvDirect(c.elemtype, sg, ep)
+ 		}
++		traceGoRecv(sg.eventid, c.id, elem2int(ep))
+ 	} else {
+ 		// Queue is full. Take the item at the
+ 		// head of the queue. Make the sender enqueue
+@@ -560,6 +589,7 @@
+ 		}
+ 		// copy data from sender to queue
+ 		typedmemmove(c.elemtype, qp, sg.elem)
++		traceGoRecv(sg.eventid, c.id, elem2int(ep))
+ 		c.recvx++
+ 		if c.recvx == c.dataqsiz {
+ 			c.recvx = 0
+@@ -721,3 +751,10 @@
+ 	racereleaseg(sg.g, chanbuf(c, 0))
+ 	raceacquire(chanbuf(c, 0))
+ }
++
++func elem2int(elem unsafe.Pointer) uint64 {
++	if elem == nil {
++		return 0
++	}
++	return uint64(*((*int)(elem)))
++}
+diff -uNr go192/src/runtime/runtime2.go go192-trace/src/runtime/runtime2.go
+--- go192/src/runtime/runtime2.go	2017-10-26 02:30:21.000000000 +0800
++++ go192-trace/src/runtime/runtime2.go	2017-10-26 16:01:02.000000000 +0800
+@@ -290,6 +290,10 @@
+ 	waitlink    *sudog // g.waiting list or semaRoot
+ 	waittail    *sudog // semaRoot
+ 	c           *hchan // channel
++
++	eventid uint64 // used for correlating send/recv
++	value   string // used for representing value to tracer
++	cid     uint64 // channel id
+ }
+ 
+ type libcall struct {
+diff -uNr go192/src/runtime/select.go go192-trace/src/runtime/select.go
+--- go192/src/runtime/select.go	2017-10-26 02:30:21.000000000 +0800
++++ go192-trace/src/runtime/select.go	2017-10-26 16:11:47.000000000 +0800
+@@ -386,6 +386,7 @@
+ 			c.recvq.enqueue(sg)
+ 
+ 		case caseSend:
++			traceGoSend(sg.eventid, c.id, elem2int(sg.elem))
+ 			c.sendq.enqueue(sg)
+ 		}
+ 	}
+@@ -486,6 +487,9 @@
+ 				c.sendq.dequeueSudoG(sglist)
+ 			} else {
+ 				c.recvq.dequeueSudoG(sglist)
++				if sg != nil {
++					traceGoRecv(sg.eventid, sg.cid, elem2int(k.elem))
++				}
+ 			}
+ 		}
+ 		sgnext = sglist.waitlink
+diff -uNr go192/src/runtime/trace.go go192-trace/src/runtime/trace.go
+--- go192/src/runtime/trace.go	2017-10-26 02:30:21.000000000 +0800
++++ go192-trace/src/runtime/trace.go	2017-10-26 16:10:23.000000000 +0800
+@@ -64,7 +64,9 @@
+ 	traceEvGoBlockGC         = 42 // goroutine blocks on GC assist [timestamp, stack]
+ 	traceEvGCMarkAssistStart = 43 // GC mark assist start [timestamp, stack]
+ 	traceEvGCMarkAssistDone  = 44 // GC mark assist done [timestamp]
+-	traceEvCount             = 45
++	traceEvGoSend            = 45 // goroutine on chan send [timestamp, stack]
++	traceEvGoRecv            = 46 // goroutine on chan recv [timestamp, stack]
++	traceEvCount             = 47
+ )
+ 
+ const (
+@@ -1082,3 +1084,11 @@
+ 		traceEvent(traceEvNextGC, -1, memstats.next_gc)
+ 	}
+ }
++
++func traceGoSend(eid, cid, val uint64) {
++	traceEvent(traceEvGoSend, -1, eid, cid, val)
++}
++
++func traceGoRecv(eid, cid, val uint64) {
++	traceEvent(traceEvGoRecv, -1, eid, cid, val)
++}
