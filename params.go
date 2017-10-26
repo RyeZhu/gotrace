@@ -16,10 +16,9 @@ func GuessParams(c Commands) *Params {
 
 	// calculate number of goroutines in each depth level
 	for _, cmd := range c.cmds {
-		depth := c.gd[cmd.Name]
 		if cmd.Command == CmdCreate {
 			totalG++
-			goroutines[depth]++
+			goroutines[cmd.Depth]++
 		}
 	}
 
@@ -33,7 +32,7 @@ func GuessParams(c Commands) *Params {
 		Angle:     angle,
 		Caps:      totalG < 5, // value from head
 		Distance:  80,
-		AutoAngle: true,
+		AutoAngle: false,
 	}
 
 	if gs, ok := goroutines[2]; ok {

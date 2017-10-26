@@ -17,7 +17,7 @@ Its primary goal is to be an educational tool for Go concurrency. It works well 
 ## Usage
 First, install gotrace:
 
-    go get -u github.com/divan/gotrace
+    go get -u github.com/RyeZhu/gotrace
 
 Second, use patched Go runtime to produce trace and binary. There are two ways to do it - use [a docker container](#using-docker) or [apply the patch locally](#appendix-a---patching-go-locally).
 
@@ -166,42 +166,42 @@ Also there are some useful hotkeys:
 
 ## Limits/Known issues
 
- - Value of variable being sent to the channel is supported only for integer types. (see [Issue #3](https://github.com/divan/gotrace/issues/3))
- - Buffered channels doesn't work (yet) (see [Issue #2](https://github.com/divan/gotrace/issues/2))
+ - Value of variable being sent to the channel is supported only for integer types. (see [Issue #3](https://github.com/RyeZhu/gotrace/issues/3))
+ - Buffered channels doesn't work (yet) (see [Issue #2](https://github.com/RyeZhu/gotrace/issues/2))
 
 # Appendix A - patching Go locally
 If you really want to play around with gotrace, you may want to patch Go runtime yourself. It will allow you to run gotrace as easy as `gotrace main.go` without all intermediate steps described above.
 
 Here are instructions on how to do it (MacOS X and Linux).
 
-1. Assuming your Go installation is in `/usr/local/go` (default), download Go 1.6.3 and unpack it into `/usr/local/go163`.
+1. Assuming your Go installation is in `/usr/local/go` (default), download Go 1.8.1 and unpack it into `/usr/local/go18-gotrace`.
 
         sudo -i
-        mkdir -p /usr/local/go163
-        curl https://storage.googleapis.com/golang/go1.6.3.src.tar.gz | tar -xz -C /usr/local/go163
+        mkdir -p /usr/local/go18-gotrace
+        curl https://storage.googleapis.com/golang/go1.8.1.src.tar.gz | tar -xz -C /usr/local/go18-gotrace
 
 2. Then, copy patch and apply it:
 
-        sudo patch -p1 -d /usr/local/go163/go < runtime/go1.6.3-tracenew.patch
+        sudo patch -p1 -d /usr/local/go18-gotrace/go < runtime/go1.8.1-gotrace.patch
 
 3. Build new runtime:
 
         sudo -i
-        cd /usr/local/go163/go/src
+        cd /usr/local/go18-gotrace/go/src
         export GOROOT_BOOTSTRAP=/usr/local/go # or choose yours
         ./make.bash
 
 4. Finally, export PATH or use `ln -s` command to make this Go version actual in your system:
 
-		export PATH=/usr/local/go163/go/bin:$PATH
+		export PATH=/usr/local/go18-gotrace/go/bin:$PATH
 or (assuming your PATH set to use /usr/local/go)
 
 		sudo mv /usr/local/go /usr/local/go-orig
-		sudo ln -nsf /usr/local/go163/go /usr/local/go
+		sudo ln -nsf /usr/local/go18-gotrace/go /usr/local/go
 
 NOTE: return your previous installation by `sudo ln -nsf /usr/local/go-orig /usr/local/go`
 
-Now, you should be able to run `gotrace main.go` and get the result.
+Now, you should be able to run `gotrace examples/pingpong02.go` and see the result in the browser.
 
 # License
 MIT License

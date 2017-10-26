@@ -16,9 +16,9 @@ ENV GOLANG_DOWNLOAD_SHA256 ce3140662f45356eb78bc16a88fc7cfb29fb00e18d7c632608245
 ENV GOPATH /go
 ENV PATH $GOPATH/bin:/usr/local/gotemp/go/bin:$PATH
 
-ENV GOLANG_TO_BUILD_VERSION 1.6.3
+ENV GOLANG_TO_BUILD_VERSION 1.8.1
 ENV GOLANG_TO_BUILD_URL https://golang.org/dl/go$GOLANG_TO_BUILD_VERSION.src.tar.gz
-ENV GOLANG_TO_BUILD_SHA256 6326aeed5f86cf18f16d6dc831405614f855e2d416a91fd3fdc334f772345b00
+ENV GOLANG_TO_BUILD_SHA256 33daf4c03f86120fdfdc66bddf6bfff4661c7ca11c5da473e537f4d69b470e57
 
 ENV GOROOT_BOOTSTRAP /usr/local/gotemp/go
 
@@ -34,7 +34,7 @@ RUN curl -fsSL "$GOLANG_DOWNLOAD_URL" -o golang.tar.gz \
 	&& tar -C /usr/local -xzf golang.tar.gz \
 	&& rm golang.tar.gz \
 	&& cd /usr/local/go/src \
-	&& patch -p2 < /runtime/go"$GOLANG_TO_BUILD_VERSION"-tracenew.patch \
+	&& patch -p2 < /runtime/go"$GOLANG_TO_BUILD_VERSION"-gotrace.patch \
 	&& ./make.bash \
 	&& rm -rf /usr/local/gotemp/
 

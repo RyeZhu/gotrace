@@ -7,7 +7,7 @@ import (
 
 type Commands struct {
 	cmds []*Command
-	gd   map[string]int
+	gd   map[string]int //goroutines depth map
 }
 
 func NewCommands() Commands {
@@ -133,9 +133,15 @@ func (a ByTimestamp) Len() int           { return len(a) }
 func (a ByTimestamp) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByTimestamp) Less(i, j int) bool { return a[i].Time < a[j].Time }
 
-// Count counts total number of commands
+// Count counts total number of commands, which is not block/unblock ones.
 func (c Commands) Count() int {
-	return len(c.cmds)
+	var count int
+	for _, c := range c.cmds {
+		if c.Command != CmdUnblock && c.Command != CmdBlock && c.Command != CmdSleep {
+			count++
+		}
+	}
+	return count
 }
 
 // CountCreateGoroutine counts total number of CreateGoroutine commands.
@@ -169,4 +175,15 @@ func (c Commands) CountSendToChannel() int {
 		}
 	}
 	return count
+}
+
+// String implements Stringer inteface for Commands.
+func (c Commands) String() string {
+	var out string
+	for _, cmd := range c.cmds {
+		if cmd.Command != CmdUnblock && cmd.Command != CmdBlock && cmd.Command != CmdSleep {
+			out = fmt.Sprintf("%s%s %v %v (%v -> %v)\n", out, cmd.Command, cmd.Parent, cmd.Name, cmd.From, cmd.To)
+		}
+	}
+	return out
 }

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/divan/gotrace/trace"
+	"github.com/RyeZhu/gotrace/trace"
 )
 
 func ConvertEvents(events []*trace.Event) (Commands, error) {
@@ -17,14 +17,15 @@ func ConvertEvents(events []*trace.Event) (Commands, error) {
 
 	debug := os.Getenv("GOTRACE_DEBUG") == "1"
 	var lastG uint64
+	var ignoredGs = make(map[uint64]bool)
 	for _, ev := range events {
 		switch ev.Type {
 		case trace.EvGoStart:
+			if ignoredGs[ev.Args[0]] {
+				break
+			}
 			if debug {
 				fmt.Println(ev.Ts, "GoStart:", ev.G, "from", lastG, ev.Args)
-			}
-			if ev.G == 1 && lastG == 0 {
-				c.StartGoroutine(ev.Ts, ev.Stk[0].Fn, ev.G, lastG)
 			}
 			lastG = ev.G
 			c.UnblockGoroutine(ev.Ts, lastG)
@@ -32,8 +33,13 @@ func ConvertEvents(events []*trace.Event) (Commands, error) {
 			if len(ev.Stk) > 0 {
 				if strings.HasPrefix(ev.Stk[0].Fn, "runtime") {
 					if ev.Stk[0].Fn != "runtime.main" {
+						ignoredGs[ev.Args[0]] = true
 						break
 					}
+				}
+				if ev.Args[0] != 1 && ev.G == 0 {
+					ignoredGs[ev.Args[0]] = true
+					break
 				}
 				c.StartGoroutine(ev.Ts, ev.Stk[0].Fn, ev.Args[0], ev.G)
 				if debug {
@@ -41,6 +47,9 @@ func ConvertEvents(events []*trace.Event) (Commands, error) {
 				}
 			}
 		case trace.EvGoUnblock:
+			if ignoredGs[ev.Args[0]] {
+				break
+			}
 			if len(ev.Stk) > 0 {
 				if strings.HasPrefix(ev.Stk[0].Fn, "runtime") {
 					if ev.Stk[0].Fn != "runtime.main" {
@@ -85,7 +94,10 @@ func ConvertEvents(events []*trace.Event) (Commands, error) {
 		case trace.EvGoSched, trace.EvGoPreempt,
 			trace.EvGoBlock, trace.EvGoBlockSelect, trace.EvGoBlockSend, trace.EvGoBlockRecv,
 			trace.EvGoBlockSync, trace.EvGoBlockCond, trace.EvGoBlockNet,
-			trace.EvGoSysBlock:
+			trace.EvGoSysBlock, trace.EvGoWaiting:
+			if ignoredGs[ev.G] {
+				continue
+			}
 			if debug {
 				fmt.Println("[DD] Block:", ev.Ts, ev.G, ev.Args)
 			}
