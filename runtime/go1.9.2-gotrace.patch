@@ -45,15 +45,15 @@ diff -uNr go192/src/internal/trace/parser.go go192-trace/src/internal/trace/pars
  }
 diff -uNr go192/src/runtime/chan.go go192-trace/src/runtime/chan.go
 --- go192/src/runtime/chan.go	2017-10-26 02:30:21.000000000 +0800
-+++ go192-trace/src/runtime/chan.go	2017-10-26 16:05:52.000000000 +0800
-@@ -29,6 +29,7 @@
- )
++++ go192-trace/src/runtime/chan.go	2017-11-05 14:02:54.000000000 +0800
+@@ -47,6 +47,7 @@
+ 	// (in particular, do not ready a G), as this can deadlock
+ 	// with stack shrinking.
+ 	lock mutex
++	id   uint64 // channel id for using in send/recv events
+ }
  
- type hchan struct {
-+	id       uint64         // channel id for using in send/recv events
- 	qcount   uint           // total data in the queue
- 	dataqsiz uint           // size of the circular queue
- 	buf      unsafe.Pointer // points to an array of dataqsiz elements
+ type waitq struct {
 @@ -54,6 +55,12 @@
  	last  *sudog
  }
