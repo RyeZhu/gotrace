@@ -40,6 +40,7 @@ type Event struct {
 	// for GoUnblock: the associated GoStart
 	// for blocking GoSysCall: the associated GoSysExit
 	// for GoSysExit: the next GoStart
+	// for GCMarkAssistStart: the associated GCMarkAssistDone
 	Link *Event
 }
 
@@ -501,10 +502,11 @@ func postProcessTrace(ver int, events []*Event) error {
 		gWaiting
 	)
 	type gdesc struct {
-		state    int
-		ev       *Event
-		evStart  *Event
-		evCreate *Event
+		state        int
+		ev           *Event
+		evStart      *Event
+		evCreate     *Event
+		evMarkAssist *Event
 	}
 	type pdesc struct {
 		running bool
@@ -579,6 +581,18 @@ func postProcessTrace(ver int, events []*Event) error {
 				return fmt.Errorf("previous sweeping is not ended before a new one (offset %v, time %v)", ev.Off, ev.Ts)
 			}
 			p.evSweep = ev
+		case EvGCMarkAssistStart:
+			if g.evMarkAssist != nil {
+				return fmt.Errorf("previous mark assist is not ended before a new one (offset %v, time %v)", ev.Off, ev.Ts)
+			}
+			g.evMarkAssist = ev
+		case EvGCMarkAssistDone:
+			// Unlike most events, mark assists can be in progress when a
+			// goroutine starts tracing, so we can't report an error here.
+			if g.evMarkAssist != nil {
+				g.evMarkAssist.Link = ev
+				g.evMarkAssist = nil
+			}
 		case EvGCSweepDone:
 			if p.evSweep == nil {
 				return fmt.Errorf("bogus sweeping end (offset %v, time %v)", ev.Off, ev.Ts)
@@ -835,15 +849,20 @@ func argNum(raw rawEvent, ver int) int {
 		if ver < 1007 {
 			narg++ // there was an unused arg before 1.7
 		}
+		return narg
+	}
+	narg++ // timestamp
+	if ver < 1007 {
+		narg++ // sequence
+	}
+	switch raw.typ {
+	case EvGCSweepDone:
+		if ver < 1009 {
+			narg -= 2 // 1.9 added two arguments
+		}
 	case EvGCStart, EvGoStart, EvGoUnblock:
 		if ver < 1007 {
 			narg-- // 1.7 added an additional seq arg
-		}
-		fallthrough
-	default:
-		narg++ // timestamp
-		if ver < 1007 {
-			narg++ // sequence
 		}
 	}
 	return narg
@@ -853,7 +872,7 @@ func argNum(raw rawEvent, ver int) int {
 var BreakTimestampsForTesting bool
 
 // Event types in the trace.
-// Verbatim copy from src/runtime/trace.go.
+// Verbatim copy from src/runtime/trace.go with the "trace" prefix removed.
 const (
 	EvNone              = 0  // unused
 	EvBatch             = 1  // start of per-P batch of events [pid, timestamp]
@@ -900,8 +919,8 @@ const (
 	EvGoBlockGC         = 42 // goroutine blocks on GC assist [timestamp, stack]
 	EvGCMarkAssistStart = 43 // GC mark assist start [timestamp, stack]
 	EvGCMarkAssistDone  = 44 // GC mark assist done [timestamp]
-	EvGoSend            = 45 // goroutine on chan send [timestamp, stack]
-	EvGoRecv            = 46 // goroutine on chan recv [timestamp, stack]
+	EvGoSend            = 45 // goroutine chan send [timestamp, stack]
+	EvGoRecv            = 46 // goroutine chan recv [timestamp, stack]
 	EvCount             = 47
 )
 
@@ -911,49 +930,51 @@ var EventDescriptions = [EvCount]struct {
 	Stack      bool
 	Args       []string
 }{
-	EvNone:           {"None", 1005, false, []string{}},
-	EvBatch:          {"Batch", 1005, false, []string{"p", "ticks"}}, // in 1.5 format it was {"p", "seq", "ticks"}
-	EvFrequency:      {"Frequency", 1005, false, []string{"freq"}},   // in 1.5 format it was {"freq", "unused"}
-	EvStack:          {"Stack", 1005, false, []string{"id", "siz"}},
-	EvGomaxprocs:     {"Gomaxprocs", 1005, true, []string{"procs"}},
-	EvProcStart:      {"ProcStart", 1005, false, []string{"thread"}},
-	EvProcStop:       {"ProcStop", 1005, false, []string{}},
-	EvGCStart:        {"GCStart", 1005, true, []string{"seq"}}, // in 1.5 format it was {}
-	EvGCDone:         {"GCDone", 1005, false, []string{}},
-	EvGCScanStart:    {"GCScanStart", 1005, false, []string{}},
-	EvGCScanDone:     {"GCScanDone", 1005, false, []string{}},
-	EvGCSweepStart:   {"GCSweepStart", 1005, true, []string{}},
-	EvGCSweepDone:    {"GCSweepDone", 1005, false, []string{}},
-	EvGoCreate:       {"GoCreate", 1005, true, []string{"g", "stack"}},
-	EvGoStart:        {"GoStart", 1005, false, []string{"g", "seq"}}, // in 1.5 format it was {"g"}
-	EvGoEnd:          {"GoEnd", 1005, false, []string{}},
-	EvGoStop:         {"GoStop", 1005, true, []string{}},
-	EvGoSched:        {"GoSched", 1005, true, []string{}},
-	EvGoPreempt:      {"GoPreempt", 1005, true, []string{}},
-	EvGoSleep:        {"GoSleep", 1005, true, []string{}},
-	EvGoBlock:        {"GoBlock", 1005, true, []string{}},
-	EvGoUnblock:      {"GoUnblock", 1005, true, []string{"g", "seq"}}, // in 1.5 format it was {"g"}
-	EvGoBlockSend:    {"GoBlockSend", 1005, true, []string{}},
-	EvGoBlockRecv:    {"GoBlockRecv", 1005, true, []string{}},
-	EvGoBlockSelect:  {"GoBlockSelect", 1005, true, []string{}},
-	EvGoBlockSync:    {"GoBlockSync", 1005, true, []string{}},
-	EvGoBlockCond:    {"GoBlockCond", 1005, true, []string{}},
-	EvGoBlockNet:     {"GoBlockNet", 1005, true, []string{}},
-	EvGoSysCall:      {"GoSysCall", 1005, true, []string{}},
-	EvGoSysExit:      {"GoSysExit", 1005, false, []string{"g", "seq", "ts"}},
-	EvGoSysBlock:     {"GoSysBlock", 1005, false, []string{}},
-	EvGoWaiting:      {"GoWaiting", 1005, false, []string{"g"}},
-	EvGoInSyscall:    {"GoInSyscall", 1005, false, []string{"g"}},
-	EvHeapAlloc:      {"HeapAlloc", 1005, false, []string{"mem"}},
-	EvNextGC:         {"NextGC", 1005, false, []string{"mem"}},
-	EvTimerGoroutine: {"TimerGoroutine", 1005, false, []string{"g"}}, // in 1.5 format it was {"g", "unused"}
-	EvFutileWakeup:   {"FutileWakeup", 1005, false, []string{}},
-	EvString:         {"String", 1007, false, []string{}},
-	EvGoStartLocal:   {"GoStartLocal", 1007, false, []string{"g"}},
-	EvGoUnblockLocal: {"GoUnblockLocal", 1007, true, []string{"g"}},
-	EvGoSysExitLocal: {"GoSysExitLocal", 1007, false, []string{"g", "ts"}},
-	EvGoStartLabel:   {"GoStartLabel", 1008, false, []string{"g", "seq", "label"}},
-	EvGoBlockGC:      {"GoBlockGC", 1008, true, []string{}},
-	EvGoSend:         {"GoSend", 1008, false, []string{"eid", "cid", "val"}},
-	EvGoRecv:         {"GoRecv", 1008, false, []string{"eid", "cid", "val"}},
+	EvNone:              {"None", 1005, false, []string{}},
+	EvBatch:             {"Batch", 1005, false, []string{"p", "ticks"}}, // in 1.5 format it was {"p", "seq", "ticks"}
+	EvFrequency:         {"Frequency", 1005, false, []string{"freq"}},   // in 1.5 format it was {"freq", "unused"}
+	EvStack:             {"Stack", 1005, false, []string{"id", "siz"}},
+	EvGomaxprocs:        {"Gomaxprocs", 1005, true, []string{"procs"}},
+	EvProcStart:         {"ProcStart", 1005, false, []string{"thread"}},
+	EvProcStop:          {"ProcStop", 1005, false, []string{}},
+	EvGCStart:           {"GCStart", 1005, true, []string{"seq"}}, // in 1.5 format it was {}
+	EvGCDone:            {"GCDone", 1005, false, []string{}},
+	EvGCScanStart:       {"GCScanStart", 1005, false, []string{}},
+	EvGCScanDone:        {"GCScanDone", 1005, false, []string{}},
+	EvGCSweepStart:      {"GCSweepStart", 1005, true, []string{}},
+	EvGCSweepDone:       {"GCSweepDone", 1005, false, []string{"swept", "reclaimed"}}, // before 1.9, format was {}
+	EvGoCreate:          {"GoCreate", 1005, true, []string{"g", "stack"}},
+	EvGoStart:           {"GoStart", 1005, false, []string{"g", "seq"}}, // in 1.5 format it was {"g"}
+	EvGoEnd:             {"GoEnd", 1005, false, []string{}},
+	EvGoStop:            {"GoStop", 1005, true, []string{}},
+	EvGoSched:           {"GoSched", 1005, true, []string{}},
+	EvGoPreempt:         {"GoPreempt", 1005, true, []string{}},
+	EvGoSleep:           {"GoSleep", 1005, true, []string{}},
+	EvGoBlock:           {"GoBlock", 1005, true, []string{}},
+	EvGoUnblock:         {"GoUnblock", 1005, true, []string{"g", "seq"}}, // in 1.5 format it was {"g"}
+	EvGoBlockSend:       {"GoBlockSend", 1005, true, []string{}},
+	EvGoBlockRecv:       {"GoBlockRecv", 1005, true, []string{}},
+	EvGoBlockSelect:     {"GoBlockSelect", 1005, true, []string{}},
+	EvGoBlockSync:       {"GoBlockSync", 1005, true, []string{}},
+	EvGoBlockCond:       {"GoBlockCond", 1005, true, []string{}},
+	EvGoBlockNet:        {"GoBlockNet", 1005, true, []string{}},
+	EvGoSysCall:         {"GoSysCall", 1005, true, []string{}},
+	EvGoSysExit:         {"GoSysExit", 1005, false, []string{"g", "seq", "ts"}},
+	EvGoSysBlock:        {"GoSysBlock", 1005, false, []string{}},
+	EvGoWaiting:         {"GoWaiting", 1005, false, []string{"g"}},
+	EvGoInSyscall:       {"GoInSyscall", 1005, false, []string{"g"}},
+	EvHeapAlloc:         {"HeapAlloc", 1005, false, []string{"mem"}},
+	EvNextGC:            {"NextGC", 1005, false, []string{"mem"}},
+	EvTimerGoroutine:    {"TimerGoroutine", 1005, false, []string{"g"}}, // in 1.5 format it was {"g", "unused"}
+	EvFutileWakeup:      {"FutileWakeup", 1005, false, []string{}},
+	EvString:            {"String", 1007, false, []string{}},
+	EvGoStartLocal:      {"GoStartLocal", 1007, false, []string{"g"}},
+	EvGoUnblockLocal:    {"GoUnblockLocal", 1007, true, []string{"g"}},
+	EvGoSysExitLocal:    {"GoSysExitLocal", 1007, false, []string{"g", "ts"}},
+	EvGoStartLabel:      {"GoStartLabel", 1008, false, []string{"g", "seq", "label"}},
+	EvGoBlockGC:         {"GoBlockGC", 1008, true, []string{}},
+	EvGCMarkAssistStart: {"GCMarkAssistStart", 1009, true, []string{}},
+	EvGCMarkAssistDone:  {"GCMarkAssistDone", 1009, false, []string{}},
+	EvGoSend:            {"GoSend", 1009, false, []string{"eid", "cid", "val"}},
+	EvGoRecv:            {"GoRecv", 1009, false, []string{"eid", "cid", "val"}},
 }

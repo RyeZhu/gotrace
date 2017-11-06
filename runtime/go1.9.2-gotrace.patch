@@ -1,30 +1,6 @@
 diff -uNr go192/src/internal/trace/parser.go go192-trace/src/internal/trace/parser.go
 --- go192/src/internal/trace/parser.go	2017-10-26 02:30:21.000000000 +0800
-+++ go192-trace/src/internal/trace/parser.go	2017-10-26 16:40:53.000000000 +0800
-@@ -55,10 +55,10 @@
- const (
- 	// Special P identifiers:
- 	FakeP    = 1000000 + iota
--	TimerP   // depicts timer unblocks
--	NetpollP // depicts network unblocks
--	SyscallP // depicts returns from syscalls
--	GCP      // depicts GC state
-+	TimerP    // depicts timer unblocks
-+	NetpollP  // depicts network unblocks
-+	SyscallP  // depicts returns from syscalls
-+	GCP       // depicts GC state
- )
- 
- // Parse parses, post-processes and verifies the trace.
-@@ -496,7 +496,7 @@
- // blocked before an unblock event).
- func postProcessTrace(ver int, events []*Event) error {
- 	const (
--		gDead = iota
-+		gDead     = iota
- 		gRunnable
- 		gRunning
- 		gWaiting
++++ go192-trace/src/internal/trace/parser.go	2017-11-06 14:11:38.000000000 +0800
 @@ -919,7 +919,9 @@
  	EvGoBlockGC         = 42 // goroutine blocks on GC assist [timestamp, stack]
  	EvGCMarkAssistStart = 43 // GC mark assist start [timestamp, stack]
@@ -40,8 +16,8 @@ diff -uNr go192/src/internal/trace/parser.go go192-trace/src/internal/trace/pars
  	EvGoBlockGC:         {"GoBlockGC", 1008, true, []string{}},
  	EvGCMarkAssistStart: {"GCMarkAssistStart", 1009, true, []string{}},
  	EvGCMarkAssistDone:  {"GCMarkAssistDone", 1009, false, []string{}},
-+	EvGoSend:            {"GoSend", 1008, false, []string{"eid", "cid", "val"}},
-+	EvGoRecv:            {"GoRecv", 1008, false, []string{"eid", "cid", "val"}},
++	EvGoSend:            {"GoSend", 1009, false, []string{"eid", "cid", "val"}},
++	EvGoRecv:            {"GoRecv", 1009, false, []string{"eid", "cid", "val"}},
  }
 diff -uNr go192/src/runtime/chan.go go192-trace/src/runtime/chan.go
 --- go192/src/runtime/chan.go	2017-10-26 02:30:21.000000000 +0800
